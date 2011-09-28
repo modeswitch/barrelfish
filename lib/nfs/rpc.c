@@ -25,20 +25,12 @@
 bool rdtscp_flag;
 #endif
 
-//#define ENABLE_RPC_DEBUGP 1
-/* FIXME: It might be a good idea to move ENABLE_RPC_DEBUGP to Config.hg */
-
-#ifdef ENABLE_RPC_DEBUGP
-#define RPC_DEBUGP(x...) printf("RPC: " x)
-#else
-#define RPC_DEBUGP(x...) ((void)0)
-#endif
-
 #define FALSE   false
 #define TRUE    true
 
 #include <nfs/xdr.h>
 #include "rpc.h"
+#include "rpc_debug.h"
 #include "xdr_pbuf.h"
 
 /// RPC authentication flavour
@@ -73,6 +65,8 @@ enum rpc_msg_type {
 // XXX: lwip synchronisation kludges
 extern struct thread_mutex *lwip_mutex;
 extern struct waitset *lwip_waitset;
+
+static uint8_t net_debug_state = 0;
 
 static int hash_function(uint32_t xid)
 {
@@ -328,11 +322,12 @@ static void rpc_timer(void *arg)
 err_t rpc_init(struct rpc_client *client, struct ip_addr server)
 {
     errval_t err;
-
     client->pcb = udp_new();
     if (client->pcb == NULL) {
         return ERR_MEM;
     }
+
+    net_debug_state = 0;
 
     client->server = server;
 

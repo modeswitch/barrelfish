@@ -589,6 +589,8 @@ static void realinit(void)
     tcp_arg(pcb, pcb);
     tcp_accept(pcb, http_server_accept);
     printf("HTTP setup time %"PRIu64"\n", get_time_delta(&last_ts));
+    printf("HTTP setup time %"PRIu64"\n", get_time_delta(&last_ts));
+    printf("Starting webserver\n");
 }
 
 void http_server_init(struct ip_addr server, const char *path)
@@ -603,7 +605,7 @@ uint64_t get_time_delta(uint64_t *l_ts)
     uint64_t ct = rdtsc();
     uint64_t delta = ct - *l_ts;
     *l_ts = ct;
-    // return delta;
-    return delta / (2800 * 1000);
+    return delta;
+    //  return delta / (2800 * 1000);
 } // end function: get_time_delta
 

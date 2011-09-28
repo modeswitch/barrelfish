@@ -15,18 +15,10 @@
 #include <assert.h>
 #include <barrelfish/barrelfish.h>
 #include <nfs/nfs.h>
+#include "nfs_debug.h"
 #include "rpc.h"
 #include "portmap_rpc.h"
 
-
-/* FIXME: It might be a good idea to move DEBUGNFS configuration to Config.hs */
-//#define DEBUGNFS 1
-
-#ifdef DEBUGNFS
-#define NFSDEBUGPRINT(arg...) printf(arg)
-#else
-#define NFSDEBUGPRINT(arg...) ((void)0)
-#endif /* DEBUGWS */
 
 static err_t portmap_lookup(struct nfs_client *client, u_int prog, u_int vers);
 
@@ -63,7 +55,9 @@ static void mount_reply_handler(struct rpc_client *rpc_client, void *arg1,
     bool rb;
 
     if (replystat != RPC_MSG_ACCEPTED || acceptstat != RPC_SUCCESS) {
-        printf("Call failed while mounting in state %d\n", client->mount_state);
+        printf("RPC failed while mounting in state %d:"
+               "replystat = %u, acceptstat = %u\n", client->mount_state,
+               replystat, acceptstat);
         goto error;
     }
 
@@ -594,8 +588,8 @@ static void read_reply_handler(struct rpc_client *rpc_client, void *arg1,
 err_t nfs_read(struct nfs_client *client, struct nfs_fh3 fh, offset3 offset,
                count3 count, nfs_read_callback_t callback, void *cbarg)
 {
-	NFSDEBUGPRINT("NFS: nfs read called on offset %lu and size %d\n",
-					offset, count);
+	NFSDEBUGPRINT("nfs read called on offset %"PRIu32" and size %d\n",
+                      (uint32_t)offset, count);
     assert(client->mount_state == NFS_INIT_COMPLETE);
 
     struct READ3args args = {
@@ -804,7 +798,7 @@ static void remove_reply_handler(struct rpc_client *rpc_client, void *arg1,
                                  uint32_t acceptstat, XDR *xdr)
 {
     struct nfs_client *client = (void *)rpc_client;
-    nfs_remove_callback_t callback = arg1;
+    nfs_remove_callback_t callback = (nfs_remove_callback_t)arg1;
     REMOVE3res result;
     bool rb;
 

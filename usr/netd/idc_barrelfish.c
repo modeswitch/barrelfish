@@ -225,30 +225,49 @@ static void setup_dhcp_timer(void)
     assert(err_is_ok(err));
 }
 
-static void remove_dhcp_timers(void)
-{
-    periodic_event_cancel(&dhcp_fine_timer);
-    periodic_event_cancel(&dhcp_coarse_timer);
-}
-
 static void link_status_change(struct netif *nf)
 {
-	printf("##############################################################\n");
+    static bool subsequent_call;
 
-    printf("Interface up! IP address %d.%d.%d.%d\n",
-    		ip4_addr1(&nf->ip_addr), ip4_addr2(&nf->ip_addr),
-    		ip4_addr3(&nf->ip_addr), ip4_addr4(&nf->ip_addr));
+    assert(nf == &netif);
 
-	printf("##############################################################\n");
+    if (netif_is_up(nf)) {
+        printf("netd: interface is now up\n");
+    } else {
+        printf("netd: interface is now down\n");
+        return;
+    }
 
-    remove_dhcp_timers();
-    /* Now, the timers are not needed.  They should be closed. */
+    if (subsequent_call) {
+        if (ip_addr_cmp(&local_ip, &nf->ip_addr) != 0) {
+            printf("netd: WARNING: IP has changed! Current address: %d.%d.%d.%d",
+                   ip4_addr1(&nf->ip_addr), ip4_addr2(&nf->ip_addr),
+                   ip4_addr3(&nf->ip_addr), ip4_addr4(&nf->ip_addr));
+        }
+    } else {
+        // warning: some regression tests depend upon the format of this message
+        printf("Interface up! IP address %d.%d.%d.%d\n",
+               ip4_addr1(&nf->ip_addr), ip4_addr2(&nf->ip_addr),
+               ip4_addr3(&nf->ip_addr), ip4_addr4(&nf->ip_addr));
+    }
+
     local_ip = nf->ip_addr;
     netif_set_default(nf);
-    NETD_DEBUG("registering netd service\n");
-    register_netd_service();
-}
 
+    if (!subsequent_call) {
+#if 0
+        /* Now, the timers are not needed.  They should be closed. */
+        /* I don't agree -- we need to keep renewing our lease -AB */
+        periodic_event_cancel(&dhcp_fine_timer);
+        periodic_event_cancel(&dhcp_coarse_timer);
+#endif
+
+        NETD_DEBUG("registering netd service\n");
+        register_netd_service();
+    }
+
+    subsequent_call = true;
+}
 
 static void get_ip_from_dhcp(void)
 {
@@ -619,6 +638,7 @@ static uint64_t populate_rx_tx_filter_mem(uint16_t port, netd_port_type_t type,
     compile_filter(filter, &filter_mem, len_rx);
     assert(*len_rx < BASE_PAGE_SIZE);
 
+    assert(filter_mem != NULL);
     memcpy(bbuf, filter_mem, *len_rx);
     free(filter);
     free(filter_mem);
@@ -1628,7 +1648,7 @@ static errval_t send_filter_for_registration(struct q_entry e)
     if (b->can_send(b)) {
         return b->tx_vtbl.register_filter_request(b,
             MKCONT(cont_queue_callback, ccnc->q),
-                                                  e.plist[0], e.plist[1], e.plist[2], e.plist[3],    e.plist[4], e.plist[5], e.plist[6]);
+      e.plist[0], e.plist[1], e.plist[2], e.plist[3],    e.plist[4], e.plist[5], e.plist[6]);
         /*  e.id,       e.len_rx,   e.len_tx,   e.buffer_id_rx, e.buffer_id_rx, e.ftype */
 
     } else {

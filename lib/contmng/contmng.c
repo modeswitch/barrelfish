@@ -44,7 +44,8 @@ static void qprintf (struct cont_queue *q, char *msg)
 
 }
 
-/* allocates the memory for continuation queue 
+
+/* allocates the memory for continuation queue
     It includes the memory for MAX_QUEUE_SIZE of elements also */
 struct cont_queue *create_cont_q(char *name)
 {
@@ -59,6 +60,19 @@ struct cont_queue *create_cont_q(char *name)
     ptr->running = 0;
     return ptr;
 }/* end function: create_cont_q */
+
+/* Tells if queue has enough space to add more events,
+ * or if the producer should pause for a while */
+int queue_free_slots(struct cont_queue *q)
+{
+    if (((q->head + 1) % MAX_QUEUE_SIZE) > q->tail) {
+        return (MAX_QUEUE_SIZE -
+                    (((q->head + 1) % MAX_QUEUE_SIZE) - q->tail)
+               );
+    } else {
+        return q->tail - ((q->head + 1) % MAX_QUEUE_SIZE);
+    }
+} // end function
 
 
 /* Adds element to the queue */
@@ -85,22 +99,19 @@ void enqueue_cont_q(struct cont_queue *q, struct q_entry *entry)
     q->head = (q->head + 1) % MAX_QUEUE_SIZE;
     qprintf(q, "enqueued");
 
-    /* ps: If this is the only element in the queue then send the msg
-           stright away. */
+    // If no continuations are running, then execute this one directly
+    if(q->running == 0){
 //    if (((q->tail + 1) % MAX_QUEUE_SIZE) == q->head) {
     if(q->running == 0){
         q->running = 1;
         qprintf(q, "directly-sending");
-        q->qelist[q->head].state += 500;
-        q->qelist[q->tail].state += 30;
         cont_queue_send_next_message(q);
     }
-    //otherwise the continuation function will trigger sending the next cap
-
+    //otherwise continuation function will trigger sending next queue element
 } /* end function: enqueue_cont_q */
 
 
-/* called from continuation registered with flounder 
+/* called from continuation registered with flounder
     WARN: should not be called directly */
 void cont_queue_callback(void *arg)
 {
@@ -108,12 +119,11 @@ void cont_queue_callback(void *arg)
 
     q->tail = (q->tail + 1) % MAX_QUEUE_SIZE;
     qprintf(q, "from-continuation");
-    q->qelist[q->tail].state += 100;
     cont_queue_send_next_message(q);
 } /* end function: cont_queue_callback */
 
 
-/* Sends the top of queue msg 
+/* Sends the top of queue msg
     NOTE: this function does not increment the tail.  It calls handler,
         which registers "cont_queue_callback" as callback with flounder,
         and that callback function increments the tail!!!
@@ -124,19 +134,17 @@ void cont_queue_send_next_message(struct cont_queue *q)
 
     if(q->head == q->tail){
         qprintf(q, "Queue-empty-Recursion-End!!");
-        q->qelist[q->tail].state += 1;
         q->running = 0;
         return;
     }
 
     errval_t err = q->qelist[q->tail].handler(q->qelist[q->tail]);
-    q->qelist[q->tail].state += 4;
     if (err_is_fail(err)) {
         if (err == FLOUNDER_ERR_TX_BUSY ) {
             qprintf(q, "sending:FLO-BUSY");
-            q->qelist[q->tail].state += 2;
         } else {
             qprintf(q, "sending:FLO FAIL");
+            q->qelist[q->tail].history += 3;
             USER_PANIC_ERR(err, "cont_queue_send_next_message ");
             q->qelist[q->tail].state += 3;
         }
@@ -145,6 +153,7 @@ void cont_queue_send_next_message(struct cont_queue *q)
 
 void cont_queue_show_queue(struct cont_queue *q)
 {
+/*
     int i = 0;
     int index = 0;
     int len = 0;
@@ -169,8 +178,9 @@ void cont_queue_show_queue(struct cont_queue *q)
                 q->qelist[index].state);
 
     }
-
+*/
 } // end function: cont_queue_show_queue
+
 
 /* Following function has nothing to do with cont_queue_management,
  * and is to be used for debugging.  Ideally this function should not exist. */

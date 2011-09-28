@@ -17,7 +17,6 @@ typedef void *vfs_handle_t;
 #define NULL_VFS_HANDLE NULL
 
 /* XXX: remove this for partitioned cache */
-#define WITH_SHARED_CACHE
 
 #ifdef WITH_SHARED_CACHE
 static const char vfs_cache_str[] = "single-shared";
@@ -25,9 +24,9 @@ static const char vfs_cache_str[] = "single-shared";
 static const char vfs_cache_str[] = "partitioned";
 #endif
 
-#define WITH_BUFFER_CACHE
+//#define WITH_BUFFER_CACHE
 //#define WITH_WRITE_BACK_CACHE
-#define WITH_META_DATA_CACHE
+//#define WITH_META_DATA_CACHE
 
 #ifdef WITH_BUFFER_CACHE
 #define BUFFER_CACHE_BLOCK_SIZE      (1U << 12)      // 4KB

@@ -49,6 +49,8 @@ struct dirent *readdir(DIR* dir)
     errval_t err;
     err = vfs_dir_read_next(dir->vh, &name, NULL);
     if (err_is_fail(err)) {
+        if (err_no(err) != FS_ERR_INDEX_BOUNDS) {
+        }
         return NULL;
     }
 

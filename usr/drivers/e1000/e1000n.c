@@ -30,6 +30,7 @@
 
 static uint8_t macaddr[6]; ///< buffers the card's MAC address upon card reset
 e1000_t d;  ///< Mackerel state
+static bool user_macaddr; /// True iff the user specified the MAC address
 static bool use_interrupt = true;
 
 //transmit
@@ -75,6 +76,22 @@ static void get_mac_address_fn(uint8_t *mac)
     memcpy(mac, macaddr, sizeof(macaddr));
 }
 
+static bool parse_mac(uint8_t *mac, const char *str)
+{
+    for (int i = 0; i < 6; i++) {
+        char *next = NULL;
+        unsigned long val = strtoul(str, &next, 16);
+        if (val > UINT8_MAX || next == NULL
+            || (i == 5 && *next != '\0')
+            || (i < 5 && (*next != ':' && *next != '-'))) {
+            return false; // parse error
+        }
+        mac[i] = val;
+        str = next + 1;
+    }
+
+    return true;
+}
 
 /*****************************************************************
  * Transmit logic
@@ -155,6 +172,21 @@ static errval_t transmit_pbuf_list_fn(struct client_closure *cl)
 	return SYS_ERR_OK;
 }
 
+static uint64_t find_tx_free_slot_count_fn(void)
+{
+    uint64_t nr_free;
+    if (ether_transmit_index >= ether_transmit_bufptr) {
+        nr_free = TRANSMIT_BUFFERS -
+            ((ether_transmit_index - ether_transmit_bufptr) %
+                TRANSMIT_BUFFERS);
+    } else {
+        nr_free = (ether_transmit_bufptr - ether_transmit_index) %
+            TRANSMIT_BUFFERS;
+    }
+
+    return nr_free;
+} // end function: find_tx_queue_len
+
 static bool check_for_free_TX_buffer(void)
 {
     bool sent = false;
@@ -168,7 +200,8 @@ static bool check_for_free_TX_buffer(void)
         if (tx_pbuf[ether_transmit_bufptr].last == true) {
 
         	sent = notify_client_free_tx(tx_pbuf[ether_transmit_bufptr].sr,
-        			tx_pbuf[ether_transmit_bufptr].client_data);
+        			tx_pbuf[ether_transmit_bufptr].client_data,
+                                find_tx_free_slot_count_fn(), 0);
         }
         ether_transmit_bufptr = (ether_transmit_bufptr + 1) % TRANSMIT_BUFFERS;
     }
@@ -184,8 +217,8 @@ static bool check_for_free_TX_buffer(void)
 static int add_desc(uint64_t paddr)
 {
     union rx_desc r;
+    r.raw[0] = r.raw[1] = 0;
     r.rx_read_format.buffer_address = paddr;
-    r.raw[1] = 0;
 
     if(receive_free == RECEIVE_BUFFERS) {
     	//E1000N_DEBUG("no space to add a new receive pbuf\n");
@@ -291,13 +324,13 @@ static bool handle_next_received_packet(void)
     		goto end;
     	}
 
-//      E1000N_DEBUG("packet received..\n");
+        // E1000N_DEBUG("packet received of size %zu..\n", len);
 
     	buffer_address = (void*)rxd->rx_read_format.buffer_address;
 		data = (buffer_address - internal_memory_pa)
 			+ internal_memory_va;
 
-		if (data == NULL){
+		if (data == NULL || len == 0){
 			printf("ERROR: Incorrect packet\n");
 			// abort();
 			/* FIXME: What should I do when such errors occur. */
@@ -383,11 +416,12 @@ static void e1000_init(struct device_mem *bar_info, int nr_allocated_bars)
 {
 	E1000N_DEBUG("starting hardware init\n");
     e1000_hwinit(&d, bar_info, nr_allocated_bars, &transmit_ring, &receive_ring,
-                 RECEIVE_BUFFERS, TRANSMIT_BUFFERS, macaddr, use_interrupt);
+                 RECEIVE_BUFFERS, TRANSMIT_BUFFERS, macaddr, user_macaddr,
+                 use_interrupt);
     E1000N_DEBUG("Done with hardware init\n");
     setup_internal_memory();
     ethersrv_init(global_service_name, get_mac_address_fn,
-				transmit_pbuf_list_fn);
+		  transmit_pbuf_list_fn, find_tx_free_slot_count_fn);
 }
 
 
@@ -434,6 +468,17 @@ int main(int argc, char **argv)
             E1000N_DEBUG("deviceid = %u\n", deviceid);
             printf("### deviceid = %u\n", deviceid);
 
+        }
+        if(strncmp(argv[i],"mac=",strlen("mac=")-1)==0) {
+            if (parse_mac(macaddr, argv[i] + strlen("mac="))) {
+                user_macaddr = true;
+                E1000N_DEBUG("MAC = %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx\n",
+                             macaddr[0], macaddr[1], macaddr[2],
+                             macaddr[3], macaddr[4], macaddr[5]);
+            } else {
+                fprintf(stderr, "%s: Error parsing MAC address '%s'\n", argv[0], argv[i]);
+                return 1;
+            }
         }
         if(strcmp(argv[i],"noirq")==0) {
             use_interrupt = false;

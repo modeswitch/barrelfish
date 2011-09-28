@@ -47,17 +47,6 @@ struct client_closure_NC {
 	struct buffer_desc *buff_ptr;
 };
 
-/**
- * \brief Receive and transmit sides
- *
- * The link to the network driver is composed by two distinct
- * channel. We identify these channels thanks to the following
- * constants.
- *
- */
-#define RECEIVE_CONNECTION 0
-#define TRANSMIT_CONNECTION 1
-
 /*
  * If we are the owner of lwip stack, then we dont need rpc
  */
@@ -74,7 +63,7 @@ static new_debug = 0;
  * \defGroup LocalStates Local states
  *
  * @{
- * 
+ *
  ****************************************************************/
 
 
@@ -104,52 +93,64 @@ static bool netd_service_connected = false;
 /**
  * \brief Number of established connections
  *
- * 
+ *
  *
  */
 static int conn_nr = 0;
 
 
 /**
- * \brief 
+ * \brief
  *
  */
 static uint8_t *mac;
 
 
 /**
- * \brief 
+ * \brief
  *
  */
 static bool mac_received = false;
 
 /**
- * \brief 
+ * \brief
  *
- * 
+ *
  *
  */
 static void (*lwip_rec_handler)(void*, uint64_t, uint64_t, uint64_t, uint64_t) = NULL;
 
 
 /**
- * \brief 
+ * \brief
  *
- * 
+ *
  *
  */
 static void *lwip_rec_data;
 
 
 /**
- * \brief 
+ * \brief
  *
- * 
+ *
  *
  */
 static void (*lwip_free_handler)(struct pbuf *) = NULL;
 
+// Statistics about driver state
+static uint64_t pkt_dropped = 0; // pkts dropped by the driver
+static uint64_t driver_tx_slots_left = 0; // no. of free slots for TX
 
+uint64_t idc_check_driver_load(void)
+{
+    return driver_tx_slots_left;
+}
+
+uint64_t idc_get_packet_drop_count(void)
+{
+    return driver_tx_slots_left;
+}
 
 /*
  * @}
@@ -198,7 +199,7 @@ uint64_t idc_send_packet_to_network_driver(struct pbuf *p)
      assert(p != NULL);
     /*
      * Count the number of pbufs to be transmitted as a single message
-     * to e1000 
+     * to e1000
      */
     int numpbufs = 0;
     for (struct pbuf *tmpp = p; tmpp != 0; tmpp = tmpp->next) {
@@ -329,7 +330,7 @@ void idc_register_buffer(struct buffer_desc *buff_ptr, uint8_t binding_index)
  *
  *
  */
- 
+
 static errval_t send_pbuf_request(struct q_entry e)
 {
     struct ether_binding *b = (struct ether_binding *)e.binding_ptr;
@@ -380,6 +381,16 @@ void idc_register_pbuf(uint64_t pbuf_id, uint64_t paddr, uint64_t len)
     enqueue_cont_q(ccnc->q, &entry);
 
 }
+
+
+int idc_check_capacity(int direction)
+{
+//    RECEIVE_CONNECTION
+    struct ether_binding *b = driver_connection[direction];
+    struct client_closure_NC *ccnc = (struct client_closure_NC *)b->st;
+    return queue_free_slots(ccnc->q);
+}
+
 
 
 void idc_get_mac_address(uint8_t *mac_client)
@@ -603,13 +614,21 @@ static void new_buffer_id(struct ether_binding *st, errval_t err,
  *
  *
  */
-static void tx_done(struct ether_binding *st, uint64_t client_data)
+static void tx_done(struct ether_binding *st, uint64_t client_data,
+        uint64_t slots_left, uint64_t dropped)
 {
     struct pbuf *done_pbuf = (struct pbuf *)(uintptr_t)client_data;
 
 	if (new_debug) printf("tx_done: called\n");
 
     lwip_mutex_lock();
+
+    // FIXME: use the slots_left and dropped info
+    if (dropped == 1) {
+        pkt_dropped = pkt_dropped + 1;
+    }
+
+    driver_tx_slots_left = slots_left;
 
 #if LWIP_TRACE_MODE
     /* FIXME: Need a way to find out the pbuf_id for this tx_done */
@@ -1031,7 +1050,7 @@ void idc_get_ip(void)
     netif_set_up(&netif);
 
     LWIPBF_DEBUG("client: owner has the IP address %d.%d.%d.%d\n",
-        ip4_addr1(&netif.ip_addr), ip4_addr2(&netif.ip_addr), 
+        ip4_addr1(&netif.ip_addr), ip4_addr2(&netif.ip_addr),
         ip4_addr3(&netif.ip_addr), ip4_addr4(&netif.ip_addr));
 }
 
@@ -1171,7 +1190,7 @@ err_t idc_udp_new_port(uint16_t *port_no)
 
 
 static err_t idc_redirect(struct ip_addr *local_ip, u16_t local_port,
-                              struct ip_addr *remote_ip, u16_t remote_port, 
+                              struct ip_addr *remote_ip, u16_t remote_port,
                               netd_port_type_t port_type)
 {
     if(is_owner) {
@@ -1205,7 +1224,7 @@ static err_t idc_redirect(struct ip_addr *local_ip, u16_t local_port,
 }
 
 static err_t idc_pause(struct ip_addr *local_ip, u16_t local_port,
-                       struct ip_addr *remote_ip, u16_t remote_port, 
+                       struct ip_addr *remote_ip, u16_t remote_port,
                        netd_port_type_t port_type)
 {
     if(is_owner) {
@@ -1250,14 +1269,14 @@ err_t idc_redirect_udp_port(uint16_t port)
 err_t idc_redirect_tcp(struct ip_addr *local_ip, u16_t local_port,
                        struct ip_addr *remote_ip, u16_t remote_port)
 {
-    return idc_redirect(local_ip, local_port, remote_ip, remote_port, 
+    return idc_redirect(local_ip, local_port, remote_ip, remote_port,
                              netd_PORT_TCP);
 }
 
 err_t idc_pause_tcp(struct ip_addr *local_ip, u16_t local_port,
                     struct ip_addr *remote_ip, u16_t remote_port)
 {
-    return idc_pause(local_ip, local_port, remote_ip, remote_port, 
+    return idc_pause(local_ip, local_port, remote_ip, remote_port,
                      netd_PORT_TCP);
 }
 
